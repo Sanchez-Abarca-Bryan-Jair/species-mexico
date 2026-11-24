@@ -523,6 +523,7 @@ with tab3:
         )
         fig_area.update_layout(**PLOTLY_LAYOUT, height=250)
         fig_area.update_xaxes(dtick=1)
+        st.plotly_chart(fig_area, use_container_width=True)
 
 
 # =============================================================================
@@ -594,3 +595,4 @@ with tab4:
             )
             fig_inv.update_layout(**PLOTLY_LAYOUT)
             fig_inv.update_xaxes(dtick=1)
+            st.plotly_chart(fig_inv, use_container_width=True)

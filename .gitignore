@@ -1,2 +1,6 @@
-data/
+# Ignorar todo en data/ excepto el GeoJSON ligero para Streamlit
+data/*
+!data/estados_simplificado.geojson
+
 envA/
+.streamlit/secrets.toml

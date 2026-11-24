@@ -1,4 +1,5 @@
 # Fenología y Expansión de Invertebrados en México
+https://observatorio-biodiversidad-mx.streamlit.app/
 
 Dashboard interactivo desarrollado en **Streamlit** para el análisis espacio-temporal de más de 1 millón de observaciones con grado de investigación (*Research Grade*) de **insectos, arácnidos y moluscos** en México durante la última década (2016–2026), utilizando datos abiertos de **GBIF / iNaturalist**.
 

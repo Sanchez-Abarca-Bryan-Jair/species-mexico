@@ -24,58 +24,57 @@ st.markdown(
             padding-bottom: 2rem;
         }
         .dash-title {
-            font-size: 2.5rem;
+            font-size: 2.4rem;
             font-weight: 800;
-            color: #1B4332;
-            margin-bottom: 0.1rem;
+            color: #234235;
+            margin-bottom: 0.15rem;
             letter-spacing: -0.02em;
         }
         .dash-subtitle {
             font-size: 0.95rem;
-            color: #52685C;
+            color: #5C6F65;
             margin-bottom: 1.5rem;
         }
         .kpi-card {
-            background: linear-gradient(145deg, #FAF7F0 0%, #EFE8D8 100%);
-            border: 1px solid #D6CCB8;
-            border-radius: 12px;
-            padding: 1.2rem 1rem;
+            border-radius: 14px;
+            padding: 1.25rem 1rem;
             text-align: center;
-            box-shadow: 0 4px 10px rgba(27, 67, 50, 0.06);
+            border: 1px solid rgba(35, 66, 53, 0.12);
+            box-shadow: 0 3px 10px rgba(35, 66, 53, 0.05);
             margin-bottom: 1rem;
+            transition: transform 0.15s ease;
         }
-        .kpi-card.highlight-sage {
-            background: linear-gradient(145deg, #D8E8DF 0%, #EBF3EE 100%);
-            border-color: #40916C;
+        .kpi-card:hover {
+            transform: translateY(-2px);
         }
         .kpi-value {
-            font-size: 2.1rem;
+            font-size: 2.05rem;
             font-weight: 800;
-            line-height: 1.1;
+            line-height: 1.15;
             margin-bottom: 0.35rem;
         }
         .kpi-label {
-            font-size: 0.9rem;
+            font-size: 0.92rem;
             font-weight: 700;
-            color: #1B2E24;
+            color: #1F2E27;
         }
         .kpi-sub {
             font-size: 0.78rem;
-            color: #52685C;
-            margin-top: 0.2rem;
+            color: #55665D;
+            margin-top: 0.25rem;
         }
         .stTabs [data-baseweb="tab-list"] {
             gap: 24px;
-            border-bottom: 1px solid #D6CCB8;
+            border-bottom: 1px solid #E2DDD2;
         }
         .stTabs [data-baseweb="tab"] {
             padding-top: 10px;
             padding-bottom: 10px;
             font-weight: 600;
-            color: #52685C;
+            color: #67786F;
         }
         .stTabs [aria-selected="true"] {
-            color: #1B4332 !important;
+            color: #234235 !important;
         }
     </style>
     """,
@@ -83,20 +82,24 @@ st.markdown(
 )
 
 
-def kpi_card(valor: str, titulo: str, subtitulo: str = "", color: str = "#2D6A4F", destacado: bool = False):
-    clase_extra = "highlight-sage" if destacado else ""
+def kpi_card(
+    valor: str,
+    titulo: str,
+    subtitulo: str = "",
+    color_texto: str = "#2D6A4F",
+    fondo: str = "#E6F2EC",
+    borde: str = "#B7D7C7",
+):
     st.markdown(
         f"""
-        <div class="kpi-card {clase_extra}">
-            <div class="kpi-value" style="color: {color};">{valor}</div>
+        <div class="kpi-card" style="background: {fondo}; border-color: {borde};">
+            <div class="kpi-value" style="color: {color_texto};">{valor}</div>
             <div class="kpi-label">{titulo}</div>
             <div class="kpi-sub">{subtitulo}</div>
         </div>
         """,
         unsafe_allow_html=True,
     )
-
-
 # -----------------------------------------------------------------------------
 # 2. CONEXIÓN A NEON Y CARGA DE GEOJSON
 # -----------------------------------------------------------------------------
@@ -188,7 +191,7 @@ def build_where(extra_conditions=None):
 PLOTLY_LAYOUT = dict(
     paper_bgcolor="rgba(0,0,0,0)",
     plot_bgcolor="rgba(0,0,0,0)",
-    font=dict(color="#E5E7EB"),
+    font=dict(color="#24342C"),
     margin=dict(l=10, r=10, t=35, b=10),
 )
 
@@ -422,11 +425,11 @@ with tab2:
 
     k1, k2, k3 = st.columns(3)
     with k1:
-        kpi_card(f"{doy_med}", "Día Pico (DOY)", "Mediana histórica de actividad", "#10B981", destacado=True)
+        kpi_card(f"{doy_med}", "Día Pico (DOY)", "Mediana histórica de actividad", "#235A45", "#E4F1EA", "#B2D4C2")
     with k2:
-        kpi_card(f"{temp_prom:.1f} °C", "Temperatura Media", "Promedio del periodo seleccionado", "#F59E0B")
+        kpi_card(f"{temp_prom:.1f} °C", "Temperatura Media", "Promedio del periodo seleccionado", "#8C5319", "#FBF0E1", "#E7CCA6")
     with k3:
-        kpi_card(f"{precip_prom:.0f} mm", "Precipitación Anual", "Promedio acumulado anual", "#38BDF8")
+        kpi_card(f"{precip_prom:.0f} mm", "Precipitación Anual", "Promedio acumulado anual", "#245873", "#E3EFF5", "#B0CFE0")
 
     # Gráfica combinada de doble eje
     meses_lbl = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]

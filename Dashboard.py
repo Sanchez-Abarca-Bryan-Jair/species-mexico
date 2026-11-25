@@ -335,37 +335,46 @@ with tab1:
         st.plotly_chart(fig_map, use_container_width=True)
 
     with col_bar:
+        anios_ordenados = sorted(df_anual["anio"].astype(int).unique())
+        pos_map = {anio: idx for idx, anio in enumerate(anios_ordenados)}
+
         df_anual["Zona"] = df_anual["en_anp"].map({True: "En ANP", False: "Fuera de ANP"})
-        df_anual["anio_str"] = df_anual["anio"].astype(int).astype(str)
+        df_anual["x_pos"] = df_anual["anio"].astype(int).map(pos_map)
 
         df_yoy = totales_anio.reset_index()
-        df_yoy["diff_anio"] = df_yoy["anio"].diff()
+        df_yoy["anio_int"] = df_yoy["anio"].astype(int)
+        df_yoy["diff_anio"] = df_yoy["anio_int"].diff()
         df_yoy["crec_pct"] = df_yoy["registros"].pct_change() * 100
-        df_yoy["anio_str"] = df_yoy["anio"].astype(int).astype(str)
+        df_yoy["x_pos"] = df_yoy["anio_int"].map(pos_map)
 
         fig_bar = px.bar(
             df_anual,
-            x="anio_str",
+            x="x_pos",
             y="registros",
             color="Zona",
             barmode="stack",
-            category_orders={"anio_str": sorted(df_anual["anio_str"].unique())},
             color_discrete_map={"En ANP": "#3B7A63", "Fuera de ANP": "#A8C5B8"},
             title="Crecimiento Anual de Observaciones (ANP vs. No ANP)",
-            labels={"anio_str": "Año", "registros": "Registros"},
+            labels={"x_pos": "Año", "registros": "Registros"},
         )
+
         for _, row in df_yoy.dropna().iterrows():
             if row["diff_anio"] == 1:
                 signo = "+" if row["crec_pct"] >= 0 else ""
                 fig_bar.add_annotation(
-                    x=row["anio_str"],
+                    x=row["x_pos"],
                     y=row["registros"],
                     text=f"{signo}{row['crec_pct']:.0f}%",
                     showarrow=False,
                     yshift=10,
                     font=dict(size=10, color="#235A45"),
                 )
-        fig_bar.update_xaxes(type="category")
+
+        fig_bar.update_xaxes(
+            tickmode="array",
+            tickvals=list(range(len(anios_ordenados))),
+            ticktext=[str(a) for a in anios_ordenados],
+        )
         fig_bar.update_layout(**PLOTLY_LAYOUT, legend=dict(orientation="h", y=1.08, x=0.6))
         st.plotly_chart(fig_bar, use_container_width=True)
 

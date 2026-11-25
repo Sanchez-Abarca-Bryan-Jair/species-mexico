@@ -19,75 +19,63 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-        /* Fondo general y espaciado */
         .block-container {
             padding-top: 3.5rem;
             padding-bottom: 2rem;
         }
-        /* Encabezados */
         .dash-title {
-            font-size: 3.1rem;
-            font-weight: 700;
-            color: #27C2F5;
+            font-size: 2.5rem;
+            font-weight: 800;
+            color: #1B4332;
             margin-bottom: 0.1rem;
             letter-spacing: -0.02em;
         }
         .dash-subtitle {
             font-size: 0.95rem;
-            color: #9CA3AF;
+            color: #52685C;
             margin-bottom: 1.5rem;
         }
-        /* Tarjetas KPI */
         .kpi-card {
-            background: linear-gradient(145deg, #161B22 0%, #1C232E 100%);
-            border: 1px solid #2D3748;
+            background: linear-gradient(145deg, #FAF7F0 0%, #EFE8D8 100%);
+            border: 1px solid #D6CCB8;
             border-radius: 12px;
             padding: 1.2rem 1rem;
             text-align: center;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+            box-shadow: 0 4px 10px rgba(27, 67, 50, 0.06);
             margin-bottom: 1rem;
         }
-        .kpi-card.highlight-teal {
-            background: linear-gradient(145deg, #112A26 0%, #161B22 100%);
-            border-color: #10B98155;
+        .kpi-card.highlight-sage {
+            background: linear-gradient(145deg, #D8E8DF 0%, #EBF3EE 100%);
+            border-color: #40916C;
         }
         .kpi-value {
-            font-size: 2.2rem;
+            font-size: 2.1rem;
             font-weight: 800;
             line-height: 1.1;
             margin-bottom: 0.35rem;
         }
         .kpi-label {
             font-size: 0.9rem;
-            font-weight: 600;
-            color: #E5E7EB;
+            font-weight: 700;
+            color: #1B2E24;
         }
         .kpi-sub {
             font-size: 0.78rem;
-            color: #9CA3AF;
+            color: #52685C;
             margin-top: 0.2rem;
         }
-        /* Contenedores de gráficas */
-        .chart-box {
-            background-color: #161B22;
-            border: 1px solid #2D3748;
-            border-radius: 12px;
-            padding: 1rem;
-            margin-bottom: 1rem;
-        }
-        /* Pestañas superiores */
         .stTabs [data-baseweb="tab-list"] {
             gap: 24px;
-            border-bottom: 1px solid #2D3748;
+            border-bottom: 1px solid #D6CCB8;
         }
         .stTabs [data-baseweb="tab"] {
             padding-top: 10px;
             padding-bottom: 10px;
             font-weight: 600;
-            color: #9CA3AF;
+            color: #52685C;
         }
         .stTabs [aria-selected="true"] {
-            color: #F9FAFB !important;
+            color: #1B4332 !important;
         }
     </style>
     """,
@@ -95,8 +83,8 @@ st.markdown(
 )
 
 
-def kpi_card(valor: str, titulo: str, subtitulo: str = "", color: str = "#10B981", destacado: bool = False):
-    clase_extra = "highlight-teal" if destacado else ""
+def kpi_card(valor: str, titulo: str, subtitulo: str = "", color: str = "#2D6A4F", destacado: bool = False):
+    clase_extra = "highlight-sage" if destacado else ""
     st.markdown(
         f"""
         <div class="kpi-card {clase_extra}">
@@ -126,6 +114,13 @@ def load_geojson():
     with open("data/estados_simplificado.geojson", "r", encoding="utf-8") as f:
         return json.load(f)
 
+@st.cache_data
+def load_geojson_mun():
+    with open("data/municipios_simplificado.geojson", "r", encoding="utf-8") as f:
+        return json.load(f)
+
+geojson_municipios = load_geojson_mun()
+df_cat_clases = run_query("SELECT DISTINCT clase FROM especies WHERE clase IS NOT NULL ORDER BY clase;")
 
 geojson_estados = load_geojson()
 
@@ -143,15 +138,26 @@ with st.sidebar:
     opciones_estado = ["Todos"] + df_cat_estados["nombre"].tolist()
     estado_sel = st.selectbox("Estado", opciones_estado)
 
-    opciones_orden = ["Todos"] + df_cat_ordenes["orden"].tolist()
-    orden_sel = st.selectbox("Orden taxonómico", opciones_orden)
+    opciones_clase = ["Todas"] + df_cat_clases["clase"].tolist()
+    clase_sel = st.selectbox("Clase (Insectos, Arácnidos, etc.)", opciones_clase)
 
+    # Filtrar órdenes según la clase seleccionada
+    if clase_sel != "Todas":
+        df_ord_filt = run_query(
+            "SELECT DISTINCT orden FROM especies WHERE clase = %s AND orden IS NOT NULL ORDER BY orden;",
+            (clase_sel,),
+        )
+        opciones_orden = ["Todos"] + df_ord_filt["orden"].tolist()
+    else:
+        opciones_orden = ["Todos"] + df_cat_ordenes["orden"].tolist()
+
+    orden_sel = st.selectbox("Orden taxonómico", opciones_orden)
     solo_anp = st.toggle("Solo en Áreas Naturales Protegidas (ANP)", value=False)
 
     st.markdown("---")
     st.caption("Datos: GBIF / iNaturalist México, CONABIO, INEGI y Open-Meteo.")
 
-# Construcción segura de cláusula WHERE dinámica
+
 def build_where(extra_conditions=None):
     conds = ["o.anio BETWEEN %s AND %s"]
     params = [rango_anios[0], rango_anios[1]]
@@ -160,6 +166,10 @@ def build_where(extra_conditions=None):
         cve = df_cat_estados.loc[df_cat_estados["nombre"] == estado_sel, "cve_ent"].values[0]
         conds.append("o.cve_ent = %s")
         params.append(cve)
+
+    if clase_sel != "Todas":
+        conds.append("e.clase = %s")
+        params.append(clase_sel)
 
     if orden_sel != "Todos":
         conds.append("e.orden = %s")
@@ -233,45 +243,96 @@ with tab1:
 
     col_map, col_bar = st.columns([1.15, 1])
 
+    # Consulta anual (la movemos arriba para calcular el % de crecimiento para el KPI)
+    df_anual = run_query(
+        f"""
+        SELECT o.anio, o.en_anp, COUNT(*) AS registros
+        FROM observaciones o
+        JOIN especies e ON o.especie_id = e.especie_id
+        {where_sql}
+        GROUP BY o.anio, o.en_anp
+        ORDER BY o.anio;
+        """,
+        params,
+    )
+
+    # Calcular % de crecimiento entre el primer y último año del rango
+    totales_anio = df_anual.groupby("anio")["registros"].sum().sort_index()
+    if len(totales_anio) >= 2 and totales_anio.iloc[0] > 0:
+        pct_crec = ((totales_anio.iloc[-1] - totales_anio.iloc[0]) / totales_anio.iloc[0]) * 100
+        signo = "+" if pct_crec >= 0 else ""
+        texto_crec = f"{signo}{pct_crec:,.1f}% ({totales_anio.index[0]} → {totales_anio.index[-1]})"
+    else:
+        texto_crec = f"{rango_anios[0]}–{rango_anios[1]}"
+
+    # En tu tarjeta KPI c1, actualiza el subtítulo con texto_crec:
+    # kpi_card(f"{total_obs:,}", "Observaciones", texto_crec, "#10B981")
+
+    col_map, col_bar = st.columns([1.15, 1])
+
     with col_map:
-        df_mapa = run_query(
-            f"""
-            SELECT o.cve_ent, est.nombre, COUNT(*) AS registros
-            FROM observaciones o
-            JOIN especies e ON o.especie_id = e.especie_id
-            JOIN estados est ON o.cve_ent = est.cve_ent
-            {where_sql}
-            GROUP BY o.cve_ent, est.nombre;
-            """,
-            params,
-        )
-        fig_map = px.choropleth(
-            df_mapa,
-            geojson=geojson_estados,
-            locations="cve_ent",
-            featureidkey="properties.cve_ent",
-            color="registros",
-            hover_name="nombre",
-            color_continuous_scale=["#0F292E", "#0D9488", "#34D399", "#A7F3D0"],
-            title="Mapa de Densidad por Estado",
-        )
+        if estado_sel == "Todos":
+            df_mapa = run_query(
+                f"""
+                SELECT o.cve_ent, est.nombre, COUNT(*) AS registros
+                FROM observaciones o
+                JOIN especies e ON o.especie_id = e.especie_id
+                JOIN estados est ON o.cve_ent = est.cve_ent
+                {where_sql}
+                GROUP BY o.cve_ent, est.nombre;
+                """,
+                params,
+            )
+            fig_map = px.choropleth(
+                df_mapa,
+                geojson=geojson_estados,
+                locations="cve_ent",
+                featureidkey="properties.cve_ent",
+                color="registros",
+                hover_name="nombre",
+                color_continuous_scale=["#0F292E", "#0D9488", "#34D399", "#A7F3D0"],
+                title="Mapa de Densidad por Estado",
+            )
+        else:
+            cve_sel = df_cat_estados.loc[df_cat_estados["nombre"] == estado_sel, "cve_ent"].values[0]
+            geojson_mun_estado = {
+                "type": "FeatureCollection",
+                "features": [
+                    f for f in geojson_municipios["features"]
+                    if f["properties"]["cve_ent"] == cve_sel
+                ],
+            }
+            df_mapa = run_query(
+                f"""
+                SELECT o.cvegeo, m.nombre, COUNT(*) AS registros
+                FROM observaciones o
+                JOIN especies e ON o.especie_id = e.especie_id
+                JOIN municipios m ON o.cvegeo = m.cvegeo
+                {where_sql}
+                GROUP BY o.cvegeo, m.nombre;
+                """,
+                params,
+            )
+            fig_map = px.choropleth(
+                df_mapa,
+                geojson=geojson_mun_estado,
+                locations="cvegeo",
+                featureidkey="properties.cvegeo",
+                color="registros",
+                hover_name="nombre",
+                color_continuous_scale=["#0F292E", "#0D9488", "#34D399", "#A7F3D0"],
+                title=f"Densidad Municipal: {estado_sel}",
+            )
+
         fig_map.update_geos(fitbounds="locations", visible=False, bgcolor="rgba(0,0,0,0)")
         fig_map.update_layout(**PLOTLY_LAYOUT, coloraxis_colorbar=dict(title="Registros", thickness=12))
         st.plotly_chart(fig_map, use_container_width=True)
 
     with col_bar:
-        df_anual = run_query(
-            f"""
-            SELECT o.anio, o.en_anp, COUNT(*) AS registros
-            FROM observaciones o
-            JOIN especies e ON o.especie_id = e.especie_id
-            {where_sql}
-            GROUP BY o.anio, o.en_anp
-            ORDER BY o.anio;
-            """,
-            params,
-        )
         df_anual["Zona"] = df_anual["en_anp"].map({True: "En ANP", False: "Fuera de ANP"})
+        df_yoy = totales_anio.reset_index()
+        df_yoy["crec_pct"] = df_yoy["registros"].pct_change() * 100
+
         fig_bar = px.bar(
             df_anual,
             x="anio",
@@ -282,9 +343,19 @@ with tab1:
             title="Crecimiento Anual de Observaciones (ANP vs. No ANP)",
             labels={"anio": "Año", "registros": "Registros"},
         )
+        # Etiquetas con % de variación anual encima de cada barra
+        for _, row in df_yoy.dropna().iterrows():
+            signo = "+" if row["crec_pct"] >= 0 else ""
+            fig_bar.add_annotation(
+                x=row["anio"],
+                y=row["registros"],
+                text=f"{signo}{row['crec_pct']:.0f}%",
+                showarrow=False,
+                yshift=10,
+                font=dict(size=10, color="#A7F3D0"),
+            )
         fig_bar.update_layout(**PLOTLY_LAYOUT, legend=dict(orientation="h", y=1.08, x=0.6))
         st.plotly_chart(fig_bar, use_container_width=True)
-
 
 # =============================================================================
 # PESTAÑA 2: FENOLOGÍA Y CLIMA
@@ -439,33 +510,72 @@ with tab3:
     col_heat, col_right = st.columns([1.2, 1])
 
     with col_heat:
-        df_heat = run_query(
-            f"""
-            SELECT
-                ROUND(o.latitud::numeric, 2) AS lat,
-                ROUND(o.longitud::numeric, 2) AS lon,
-                COUNT(*) AS densidad
-            FROM observaciones o
-            JOIN especies e ON o.especie_id = e.especie_id
-            {where_im}
-            GROUP BY 1, 2;
-            """,
-            params_im,
+        tipo_mapa_im = st.radio(
+            "Tipo de mapa:",
+            ["Mapa de Calor", "Puntos por Género", "Coroplético por Estado"],
+            horizontal=True,
+            key="mapa_im_tipo",
         )
-        fig_heat = px.density_map(
-            df_heat,
-            lat="lat",
-            lon="lon",
-            z="densidad",
-            radius=12,
-            center=dict(lat=23.6, lon=-102.5),
-            zoom=4,
-            map_style="carto-darkmatter",
-            color_continuous_scale="Inferno",
-            title="Mapa de Calor: Avistamientos de Importancia Médica",
-        )
-        fig_heat.update_layout(**PLOTLY_LAYOUT, height=520)
-        st.plotly_chart(fig_heat, use_container_width=True)
+
+        if tipo_mapa_im == "Mapa de Calor":
+            df_heat = run_query(
+                f"""
+                SELECT ROUND(o.latitud::numeric, 2) AS lat, ROUND(o.longitud::numeric, 2) AS lon, COUNT(*) AS densidad
+                FROM observaciones o
+                JOIN especies e ON o.especie_id = e.especie_id
+                {where_im}
+                GROUP BY 1, 2;
+                """,
+                params_im,
+            )
+            fig_im_map = px.density_map(
+                df_heat, lat="lat", lon="lon", z="densidad", radius=12,
+                center=dict(lat=23.6, lon=-102.5), zoom=4,
+                map_style="carto-darkmatter", color_continuous_scale="Inferno",
+            )
+
+        elif tipo_mapa_im == "Puntos por Género":
+            df_pts = run_query(
+                f"""
+                SELECT
+                    ROUND(o.latitud::numeric, 2) AS lat,
+                    ROUND(o.longitud::numeric, 2) AS lon,
+                    e.genero,
+                    COUNT(*) AS registros
+                FROM observaciones o
+                JOIN especies e ON o.especie_id = e.especie_id
+                {where_im}
+                GROUP BY 1, 2, 3;
+                """,
+                params_im,
+            )
+            fig_im_map = px.scatter_map(
+                df_pts, lat="lat", lon="lon", color="genero", size="registros",
+                size_max=18, center=dict(lat=23.6, lon=-102.5), zoom=4,
+                map_style="carto-darkmatter", hover_name="genero",
+            )
+
+        else:  # Coroplético por Estado
+            df_coro_im = run_query(
+                f"""
+                SELECT o.cve_ent, est.nombre, COUNT(*) AS registros
+                FROM observaciones o
+                JOIN especies e ON o.especie_id = e.especie_id
+                JOIN estados est ON o.cve_ent = est.cve_ent
+                {where_im}
+                GROUP BY o.cve_ent, est.nombre;
+                """,
+                params_im,
+            )
+            fig_im_map = px.choropleth(
+                df_coro_im, geojson=geojson_estados, locations="cve_ent",
+                featureidkey="properties.cve_ent", color="registros",
+                hover_name="nombre", color_continuous_scale="YlOrRd",
+            )
+            fig_im_map.update_geos(fitbounds="locations", visible=False, bgcolor="rgba(0,0,0,0)")
+
+        fig_im_map.update_layout(**PLOTLY_LAYOUT, height=500)
+        st.plotly_chart(fig_im_map, use_container_width=True)
 
     with col_right:
         df_top_gen = run_query(
@@ -596,3 +706,45 @@ with tab4:
             fig_inv.update_layout(**PLOTLY_LAYOUT)
             fig_inv.update_xaxes(dtick=1)
             st.plotly_chart(fig_inv, use_container_width=True)
+
+            st.markdown("---")
+        tipo_mapa_inv = st.radio(
+            f"Mapa de distribución para {especie_sel}:",
+            ["Avance por Año (Puntos)", "Mapa de Calor"],
+            horizontal=True,
+            key="mapa_inv_tipo",
+        )
+
+        df_mapa_inv = run_query(
+            """
+            SELECT
+                ROUND(o.latitud::numeric, 2) AS lat,
+                ROUND(o.longitud::numeric, 2) AS lon,
+                MIN(o.anio) AS primer_anio,
+                COUNT(*) AS registros
+            FROM observaciones o
+            JOIN especies e ON o.especie_id = e.especie_id
+            WHERE e.especie = %s AND o.anio BETWEEN %s AND %s
+            GROUP BY 1, 2;
+            """,
+            (especie_sel, rango_anios[0], rango_anios[1]),
+        )
+
+        if tipo_mapa_inv == "Avance por Año (Puntos)":
+            fig_inv_map = px.scatter_map(
+                df_mapa_inv, lat="lat", lon="lon", color="primer_anio", size="registros",
+                size_max=16, center=dict(lat=23.6, lon=-102.5), zoom=4,
+                map_style="carto-darkmatter", color_continuous_scale="Plasma",
+                labels={"primer_anio": "Año 1er registro"},
+                title=f"Distribución Histórica: {especie_sel}",
+            )
+        else:
+            fig_inv_map = px.density_map(
+                df_mapa_inv, lat="lat", lon="lon", z="registros", radius=12,
+                center=dict(lat=23.6, lon=-102.5), zoom=4,
+                map_style="carto-darkmatter", color_continuous_scale="YlOrRd",
+                title=f"Densidad de Avistamientos: {especie_sel}",
+            )
+
+        fig_inv_map.update_layout(**PLOTLY_LAYOUT, height=480)
+        st.plotly_chart(fig_inv_map, use_container_width=True)

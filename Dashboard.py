@@ -161,6 +161,7 @@ with st.sidebar:
 
     st.markdown("---")
     st.caption("Datos: GBIF / iNaturalist México, CONABIO, INEGI y Open-Meteo.")
+    st.caption("Nota: El corte de datos no incluye registros para el año 2025.")
 
 
 def build_where(extra_conditions=None):
@@ -271,12 +272,12 @@ with tab1:
         if estado_sel == "Todos":
             df_mapa = run_query(
                 f"""
-                SELECT o.cve_ent, est.nombre, COUNT(*) AS registros
+                SELECT LPAD(o.cve_ent::text, 2, '0') AS cve_ent, est.nombre, COUNT(*) AS registros
                 FROM observaciones o
                 JOIN especies e ON o.especie_id = e.especie_id
-                JOIN estados est ON o.cve_ent = est.cve_ent
+                JOIN estados est ON LPAD(o.cve_ent::text, 2, '0') = LPAD(est.cve_ent::text, 2, '0')
                 {where_sql}
-                GROUP BY o.cve_ent, est.nombre;
+                GROUP BY 1, 2;
                 """,
                 params,
             )
@@ -291,22 +292,30 @@ with tab1:
                 title="Mapa de Densidad por Estado",
             )
         else:
-            cve_sel = df_cat_estados.loc[df_cat_estados["nombre"] == estado_sel, "cve_ent"].values[0]
+            cve_sel = str(df_cat_estados.loc[df_cat_estados["nombre"] == estado_sel, "cve_ent"].values[0]).zfill(2)
             geojson_mun_estado = {
                 "type": "FeatureCollection",
                 "features": [
-                    f for f in geojson_municipios["features"]
-                    if f["properties"]["cve_ent"] == cve_sel
+                    {
+                        **f,
+                        "properties": {
+                            **f["properties"],
+                            "cve_ent": str(f["properties"]["cve_ent"]).zfill(2),
+                            "cvegeo": str(f["properties"]["cvegeo"]).zfill(5),
+                        },
+                    }
+                    for f in geojson_municipios["features"]
+                    if str(f["properties"]["cve_ent"]).zfill(2) == cve_sel
                 ],
             }
             df_mapa = run_query(
                 f"""
-                SELECT o.cvegeo, m.nombre, COUNT(*) AS registros
+                SELECT LPAD(o.cvegeo::text, 5, '0') AS cvegeo, m.nombre, COUNT(*) AS registros
                 FROM observaciones o
                 JOIN especies e ON o.especie_id = e.especie_id
-                JOIN municipios m ON o.cvegeo = m.cvegeo
+                JOIN municipios m ON LPAD(o.cvegeo::text, 5, '0') = LPAD(m.cvegeo::text, 5, '0')
                 {where_sql}
-                GROUP BY o.cvegeo, m.nombre;
+                GROUP BY 1, 2;
                 """,
                 params,
             )
@@ -327,29 +336,36 @@ with tab1:
 
     with col_bar:
         df_anual["Zona"] = df_anual["en_anp"].map({True: "En ANP", False: "Fuera de ANP"})
+        df_anual["anio_str"] = df_anual["anio"].astype(int).astype(str)
+
         df_yoy = totales_anio.reset_index()
+        df_yoy["diff_anio"] = df_yoy["anio"].diff()
         df_yoy["crec_pct"] = df_yoy["registros"].pct_change() * 100
+        df_yoy["anio_str"] = df_yoy["anio"].astype(int).astype(str)
 
         fig_bar = px.bar(
             df_anual,
-            x="anio",
+            x="anio_str",
             y="registros",
             color="Zona",
             barmode="stack",
+            category_orders={"anio_str": sorted(df_anual["anio_str"].unique())},
             color_discrete_map={"En ANP": "#3B7A63", "Fuera de ANP": "#A8C5B8"},
             title="Crecimiento Anual de Observaciones (ANP vs. No ANP)",
-            labels={"anio": "Año", "registros": "Registros"},
+            labels={"anio_str": "Año", "registros": "Registros"},
         )
         for _, row in df_yoy.dropna().iterrows():
-            signo = "+" if row["crec_pct"] >= 0 else ""
-            fig_bar.add_annotation(
-                x=row["anio"],
-                y=row["registros"],
-                text=f"{signo}{row['crec_pct']:.0f}%",
-                showarrow=False,
-                yshift=10,
-                font=dict(size=10, color="#235A45"),
-            )
+            if row["diff_anio"] == 1:
+                signo = "+" if row["crec_pct"] >= 0 else ""
+                fig_bar.add_annotation(
+                    x=row["anio_str"],
+                    y=row["registros"],
+                    text=f"{signo}{row['crec_pct']:.0f}%",
+                    showarrow=False,
+                    yshift=10,
+                    font=dict(size=10, color="#235A45"),
+                )
+        fig_bar.update_xaxes(type="category")
         fig_bar.update_layout(**PLOTLY_LAYOUT, legend=dict(orientation="h", y=1.08, x=0.6))
         st.plotly_chart(fig_bar, use_container_width=True)
 
@@ -444,17 +460,19 @@ with tab2:
 
     c_izq, c_der = st.columns(2)
     with c_izq:
+        df_feno_anio["anio_str"] = df_feno_anio["anio"].astype(int).astype(str)
         fig_rango = go.Figure()
-        fig_rango.add_trace(go.Scatter(x=df_feno_anio["anio"], y=df_feno_anio["doy_p90"], line=dict(width=0), showlegend=False))
+        fig_rango.add_trace(go.Scatter(x=df_feno_anio["anio_str"], y=df_feno_anio["doy_p90"], line=dict(width=0), showlegend=False))
         fig_rango.add_trace(
             go.Scatter(
-                x=df_feno_anio["anio"], y=df_feno_anio["doy_p10"], fill="tonexty",
+                x=df_feno_anio["anio_str"], y=df_feno_anio["doy_p10"], fill="tonexty",
                 fillcolor="rgba(103, 169, 142, 0.25)", line=dict(width=0), name="Ventana activa (P10–P90)"
             )
         )
         fig_rango.add_trace(
-            go.Scatter(x=df_feno_anio["anio"], y=df_feno_anio["doy_pico"], mode="lines+markers", line=dict(color="#2D6A4F", width=3), name="Día Pico (Mediana)")
+            go.Scatter(x=df_feno_anio["anio_str"], y=df_feno_anio["doy_pico"], mode="lines+markers", line=dict(color="#2D6A4F", width=3), name="Día Pico (Mediana)")
         )
+        fig_rango.update_xaxes(type="category")
         fig_rango.update_layout(**PLOTLY_LAYOUT, title="Ventana de Actividad (DOY) por Año", xaxis_title="Año", yaxis_title="Día del Año (1-366)")
         st.plotly_chart(fig_rango, use_container_width=True)
 
@@ -525,9 +543,15 @@ with tab3:
                 params_im,
             )
             fig_im_map = px.density_map(
-                df_heat, lat="lat", lon="lon", z="densidad", radius=12,
-                center=dict(lat=23.6, lon=-102.5), zoom=4,
-                map_style="carto-positron", color_continuous_scale="YlOrRd",
+                df_heat,
+                lat="lat",
+                lon="lon",
+                z="densidad",
+                radius=12,
+                center=dict(lat=23.6, lon=-102.5),
+                zoom=4,
+                map_style="carto-positron",
+                color_continuous_scale="YlOrRd",
             )
 
         elif tipo_mapa_im == "Puntos por Género":
@@ -537,40 +561,54 @@ with tab3:
                     ROUND(o.latitud::numeric, 2) AS lat,
                     ROUND(o.longitud::numeric, 2) AS lon,
                     e.genero,
+                    e.especie,
+                    COALESCE(NULLIF(TRIM(e.nombre_comun), ''), 'Sin nombre común') AS nombre_comun,
                     COUNT(*) AS registros
                 FROM observaciones o
                 JOIN especies e ON o.especie_id = e.especie_id
                 {where_im}
-                GROUP BY 1, 2, 3;
+                GROUP BY 1, 2, 3, 4, 5;
                 """,
                 params_im,
             )
             fig_im_map = px.scatter_map(
-                df_pts, lat="lat", lon="lon", color="genero", size="registros",
-                size_max=18, center=dict(lat=23.6, lon=-102.5), zoom=4,
-                map_style="carto-positron", hover_name="genero",
+                df_pts,
+                lat="lat",
+                lon="lon",
+                color="genero",
+                size="registros",
+                size_max=18,
+                center=dict(lat=23.6, lon=-102.5),
+                zoom=4,
+                map_style="carto-positron",
+                hover_name="especie",
+                hover_data={"nombre_comun": True, "genero": True, "registros": True, "lat": False, "lon": False},
             )
 
         else:
             df_coro_im = run_query(
                 f"""
-                SELECT o.cve_ent, est.nombre, COUNT(*) AS registros
+                SELECT LPAD(o.cve_ent::text, 2, '0') AS cve_ent, est.nombre, COUNT(*) AS registros
                 FROM observaciones o
                 JOIN especies e ON o.especie_id = e.especie_id
-                JOIN estados est ON o.cve_ent = est.cve_ent
+                JOIN estados est ON LPAD(o.cve_ent::text, 2, '0') = LPAD(est.cve_ent::text, 2, '0')
                 {where_im}
-                GROUP BY o.cve_ent, est.nombre;
+                GROUP BY 1, 2;
                 """,
                 params_im,
             )
             fig_im_map = px.choropleth(
-                df_coro_im, geojson=geojson_estados, locations="cve_ent",
-                featureidkey="properties.cve_ent", color="registros",
-                hover_name="nombre", color_continuous_scale=["#FBF0E1", "#E8A87C", "#C86D51", "#7F3B27"],
+                df_coro_im,
+                geojson=geojson_estados,
+                locations="cve_ent",
+                featureidkey="properties.cve_ent",
+                color="registros",
+                hover_name="nombre",
+                color_continuous_scale=["#FBF0E1", "#E8A87C", "#C86D51", "#7F3B27"],
             )
             fig_im_map.update_geos(fitbounds="locations", visible=False, bgcolor="rgba(0,0,0,0)")
 
-        fig_im_map.update_layout(**PLOTLY_LAYOUT, height=500)
+        fig_im_map.update_layout(**PLOTLY_LAYOUT, height=520)
         st.plotly_chart(fig_im_map, use_container_width=True)
 
     with col_right:
@@ -596,7 +634,7 @@ with tab3:
             title="Top Géneros de Importancia Médica",
             labels={"registros": "Registros", "genero": ""},
         )
-        fig_gen.update_layout(**PLOTLY_LAYOUT, height=250, coloraxis_showscale=False)
+        fig_gen.update_layout(**PLOTLY_LAYOUT, height=240, coloraxis_showscale=False)
         st.plotly_chart(fig_gen, use_container_width=True)
 
         df_exp_im = run_query(
@@ -615,21 +653,51 @@ with tab3:
             """,
             params_im,
         )
-        df_exp_im["anio_llegada"] = df_exp_im["anio_llegada"].astype(int)
+        df_exp_im["anio_str"] = df_exp_im["anio_llegada"].astype(int).astype(str)
         df_exp_im["municipios_acumulados"] = df_exp_im["municipios_acumulados"].astype(int)
 
         fig_area = px.area(
             df_exp_im,
-            x="anio_llegada",
+            x="anio_str",
             y="municipios_acumulados",
             orientation="v",
             title="Expansión Territorial: Municipios Acumulados",
-            labels={"anio_llegada": "Año", "municipios_acumulados": "Municipios"},
+            labels={"anio_str": "Año", "municipios_acumulados": "Municipios"},
             color_discrete_sequence=["#C86D51"],
         )
-        fig_area.update_layout(**PLOTLY_LAYOUT, height=250)
-        fig_area.update_xaxes(dtick=1)
+        fig_area.update_xaxes(type="category")
+        fig_area.update_layout(**PLOTLY_LAYOUT, height=240)
         st.plotly_chart(fig_area, use_container_width=True)
+
+    st.markdown("#### Especies de Importancia Médica más Registradas")
+    df_top_im = run_query(
+        f"""
+        SELECT
+            e.especie,
+            COALESCE(NULLIF(TRIM(e.nombre_comun), ''), 'Sin nombre común') AS nombre_comun,
+            e.genero,
+            COUNT(*) AS registros,
+            COUNT(DISTINCT o.cvegeo) AS municipios
+        FROM observaciones o
+        JOIN especies e ON o.especie_id = e.especie_id
+        {where_im}
+        GROUP BY e.especie, e.nombre_comun, e.genero
+        ORDER BY registros DESC
+        LIMIT 12;
+        """,
+        params_im,
+    )
+    st.dataframe(
+        df_top_im.rename(columns={
+            "especie": "Especie",
+            "nombre_comun": "Nombre común",
+            "genero": "Género",
+            "registros": "Registros",
+            "municipios": "Municipios",
+        }),
+        use_container_width=True,
+        hide_index=True,
+    )
 
 
 # =============================================================================
@@ -645,6 +713,7 @@ with tab4:
         f"""
         SELECT
             e.especie,
+            COALESCE(NULLIF(TRIM(e.nombre_comun), ''), 'Sin nombre común') AS nombre_comun,
             e.clase,
             COUNT(*) AS avistamientos,
             COUNT(DISTINCT o.cve_ent) AS estados,
@@ -652,7 +721,7 @@ with tab4:
         FROM observaciones o
         JOIN especies e ON o.especie_id = e.especie_id
         {where_inv}
-        GROUP BY e.especie, e.clase
+        GROUP BY e.especie, e.nombre_comun, e.clase
         ORDER BY municipios DESC
         LIMIT 15;
         """,
@@ -662,84 +731,157 @@ with tab4:
     if df_inv_top.empty:
         st.info("No se encontraron registros de especies invasoras con los filtros actuales.")
     else:
-        col_t, col_e = st.columns([1.1, 1])
+        col_t, col_e = st.columns([1.15, 1])
         with col_t:
-            st.dataframe(df_inv_top, use_container_width=True, hide_index=True)
+            st.dataframe(
+                df_inv_top.rename(columns={
+                    "especie": "Especie",
+                    "nombre_comun": "Nombre común",
+                    "clase": "Clase",
+                    "avistamientos": "Avistamientos",
+                    "estados": "Estados",
+                    "municipios": "Municipios",
+                }),
+                use_container_width=True,
+                hide_index=True,
+            )
 
         with col_e:
-            especie_sel = st.selectbox("Analizar expansión municipal de:", df_inv_top["especie"].tolist())
-            df_exp_sp = run_query(
-                """
-                WITH primer AS (
-                    SELECT o.cvegeo, MIN(o.anio) AS anio_llegada
-                    FROM observaciones o
-                    JOIN especies e ON o.especie_id = e.especie_id
-                    WHERE e.especie = %s
-                    GROUP BY o.cvegeo
+            opciones_sp = {"Todas las especies invasoras": "TODAS"}
+            for _, row in df_inv_top.iterrows():
+                etiqueta = f"{row['especie']} — {row['nombre_comun']}"
+                opciones_sp[etiqueta] = row["especie"]
+
+            etiqueta_sel = st.selectbox("Analizar expansión municipal de:", list(opciones_sp.keys()))
+            especie_sel = opciones_sp[etiqueta_sel]
+
+            if especie_sel == "TODAS":
+                titulo_exp = "Todas las especies invasoras"
+                df_exp_sp = run_query(
+                    f"""
+                    WITH primer AS (
+                        SELECT o.cvegeo, MIN(o.anio) AS anio_llegada
+                        FROM observaciones o
+                        JOIN especies e ON o.especie_id = e.especie_id
+                        {where_inv}
+                        GROUP BY o.cvegeo
+                    )
+                    SELECT
+                        anio_llegada,
+                        COUNT(*) AS nuevos,
+                        SUM(COUNT(*)) OVER (ORDER BY anio_llegada) AS acumulados
+                    FROM primer
+                    GROUP BY anio_llegada
+                    ORDER BY anio_llegada;
+                    """,
+                    params_inv,
                 )
-                SELECT
-                    anio_llegada,
-                    COUNT(*) AS nuevos,
-                    SUM(COUNT(*)) OVER (ORDER BY anio_llegada) AS acumulados
-                FROM primer
-                GROUP BY anio_llegada
-                ORDER BY anio_llegada;
-                """,
-                (especie_sel,),
-            )
-            df_exp_sp["anio_llegada"] = df_exp_sp["anio_llegada"].astype(int)
+            else:
+                nombre_comun_sel = df_inv_top.loc[df_inv_top["especie"] == especie_sel, "nombre_comun"].iloc[0]
+                titulo_exp = f"{especie_sel} ({nombre_comun_sel})"
+                where_sp, params_sp = build_where(["e.es_invasora = TRUE", "e.especie = %s"])
+                df_exp_sp = run_query(
+                    f"""
+                    WITH primer AS (
+                        SELECT o.cvegeo, MIN(o.anio) AS anio_llegada
+                        FROM observaciones o
+                        JOIN especies e ON o.especie_id = e.especie_id
+                        {where_sp}
+                        GROUP BY o.cvegeo
+                    )
+                    SELECT
+                        anio_llegada,
+                        COUNT(*) AS nuevos,
+                        SUM(COUNT(*)) OVER (ORDER BY anio_llegada) AS acumulados
+                    FROM primer
+                    GROUP BY anio_llegada
+                    ORDER BY anio_llegada;
+                    """,
+                    params_sp + (especie_sel,),
+                )
+
+            df_exp_sp["anio_str"] = df_exp_sp["anio_llegada"].astype(int).astype(str)
             df_exp_sp["acumulados"] = df_exp_sp["acumulados"].astype(int)
 
             fig_inv = px.area(
                 df_exp_sp,
-                x="anio_llegada",
+                x="anio_str",
                 y="acumulados",
                 orientation="v",
-                title=f"Municipios Acumulados: {especie_sel}",
-                labels={"anio_llegada": "Año", "acumulados": "Municipios"},
+                title=f"Municipios Acumulados: {titulo_exp}",
+                labels={"anio_str": "Año", "acumulados": "Municipios"},
                 color_discrete_sequence=["#D9822B"],
             )
+            fig_inv.update_xaxes(type="category")
             fig_inv.update_layout(**PLOTLY_LAYOUT)
-            fig_inv.update_xaxes(dtick=1)
             st.plotly_chart(fig_inv, use_container_width=True)
 
         st.markdown("---")
         tipo_mapa_inv = st.radio(
-            f"Mapa de distribución para {especie_sel}:",
+            f"Mapa de distribución para {titulo_exp}:",
             ["Avance por Año (Puntos)", "Mapa de Calor"],
             horizontal=True,
             key="mapa_inv_tipo",
         )
 
-        df_mapa_inv = run_query(
-            """
-            SELECT
-                ROUND(o.latitud::numeric, 2) AS lat,
-                ROUND(o.longitud::numeric, 2) AS lon,
-                MIN(o.anio) AS primer_anio,
-                COUNT(*) AS registros
-            FROM observaciones o
-            JOIN especies e ON o.especie_id = e.especie_id
-            WHERE e.especie = %s AND o.anio BETWEEN %s AND %s
-            GROUP BY 1, 2;
-            """,
-            (especie_sel, rango_anios[0], rango_anios[1]),
-        )
+        if especie_sel == "TODAS":
+            df_mapa_inv = run_query(
+                f"""
+                SELECT
+                    ROUND(o.latitud::numeric, 2) AS lat,
+                    ROUND(o.longitud::numeric, 2) AS lon,
+                    MIN(o.anio) AS primer_anio,
+                    COUNT(*) AS registros
+                FROM observaciones o
+                JOIN especies e ON o.especie_id = e.especie_id
+                {where_inv}
+                GROUP BY 1, 2;
+                """,
+                params_inv,
+            )
+        else:
+            df_mapa_inv = run_query(
+                f"""
+                SELECT
+                    ROUND(o.latitud::numeric, 2) AS lat,
+                    ROUND(o.longitud::numeric, 2) AS lon,
+                    MIN(o.anio) AS primer_anio,
+                    COUNT(*) AS registros
+                FROM observaciones o
+                JOIN especies e ON o.especie_id = e.especie_id
+                {where_sp}
+                GROUP BY 1, 2;
+                """,
+                params_sp + (especie_sel,),
+            )
 
         if tipo_mapa_inv == "Avance por Año (Puntos)":
             fig_inv_map = px.scatter_map(
-                df_mapa_inv, lat="lat", lon="lon", color="primer_anio", size="registros",
-                size_max=16, center=dict(lat=23.6, lon=-102.5), zoom=4,
-                map_style="carto-positron", color_continuous_scale="Viridis",
+                df_mapa_inv,
+                lat="lat",
+                lon="lon",
+                color="primer_anio",
+                size="registros",
+                size_max=16,
+                center=dict(lat=23.6, lon=-102.5),
+                zoom=4,
+                map_style="carto-positron",
+                color_continuous_scale="Viridis",
                 labels={"primer_anio": "Año 1er registro"},
-                title=f"Distribución Histórica: {especie_sel}",
+                title=f"Distribución Histórica: {titulo_exp}",
             )
         else:
             fig_inv_map = px.density_map(
-                df_mapa_inv, lat="lat", lon="lon", z="registros", radius=12,
-                center=dict(lat=23.6, lon=-102.5), zoom=4,
-                map_style="carto-positron", color_continuous_scale="YlOrRd",
-                title=f"Densidad de Avistamientos: {especie_sel}",
+                df_mapa_inv,
+                lat="lat",
+                lon="lon",
+                z="registros",
+                radius=12,
+                center=dict(lat=23.6, lon=-102.5),
+                zoom=4,
+                map_style="carto-positron",
+                color_continuous_scale="YlOrRd",
+                title=f"Densidad de Avistamientos: {titulo_exp}",
             )
 
         fig_inv_map.update_layout(**PLOTLY_LAYOUT, height=480)

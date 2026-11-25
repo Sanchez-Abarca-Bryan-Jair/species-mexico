@@ -11,7 +11,7 @@ import streamlit as st
 # -----------------------------------------------------------------------------
 st.set_page_config(
     page_title="Biodiversidad de Invertebrados en México",
-    page_icon="🦋",
+    page_icon="icons/mariposa.png",
     layout="wide",
     initial_sidebar_state="expanded",
 )

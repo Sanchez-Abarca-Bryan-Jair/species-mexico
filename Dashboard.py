@@ -86,9 +86,9 @@ def kpi_card(
     valor: str,
     titulo: str,
     subtitulo: str = "",
-    color_texto: str = "#2D6A4F",
-    fondo: str = "#E6F2EC",
-    borde: str = "#B7D7C7",
+    color_texto: str = "#235A45",
+    fondo: str = "#E4F1EA",
+    borde: str = "#B2D4C2",
 ):
     st.markdown(
         f"""
@@ -100,6 +100,8 @@ def kpi_card(
         """,
         unsafe_allow_html=True,
     )
+
+
 # -----------------------------------------------------------------------------
 # 2. CONEXIÓN A NEON Y CARGA DE GEOJSON
 # -----------------------------------------------------------------------------
@@ -117,18 +119,19 @@ def load_geojson():
     with open("data/estados_simplificado.geojson", "r", encoding="utf-8") as f:
         return json.load(f)
 
+
 @st.cache_data
 def load_geojson_mun():
     with open("data/municipios_simplificado.geojson", "r", encoding="utf-8") as f:
         return json.load(f)
 
-geojson_municipios = load_geojson_mun()
-df_cat_clases = run_query("SELECT DISTINCT clase FROM especies WHERE clase IS NOT NULL ORDER BY clase;")
 
 geojson_estados = load_geojson()
+geojson_municipios = load_geojson_mun()
 
 # Catálogos para los filtros del sidebar
 df_cat_estados = run_query("SELECT cve_ent, nombre FROM estados ORDER BY nombre;")
+df_cat_clases = run_query("SELECT DISTINCT clase FROM especies WHERE clase IS NOT NULL ORDER BY clase;")
 df_cat_ordenes = run_query("SELECT DISTINCT orden FROM especies WHERE orden IS NOT NULL ORDER BY orden;")
 
 # -----------------------------------------------------------------------------
@@ -144,7 +147,6 @@ with st.sidebar:
     opciones_clase = ["Todas"] + df_cat_clases["clase"].tolist()
     clase_sel = st.selectbox("Clase (Insectos, Arácnidos, etc.)", opciones_clase)
 
-    # Filtrar órdenes según la clase seleccionada
     if clase_sel != "Todas":
         df_ord_filt = run_query(
             "SELECT DISTINCT orden FROM especies WHERE clase = %s AND orden IS NOT NULL ORDER BY orden;",
@@ -187,7 +189,6 @@ def build_where(extra_conditions=None):
     return " WHERE " + " AND ".join(conds), tuple(params)
 
 
-# Estilo común para gráficas Plotly
 PLOTLY_LAYOUT = dict(
     paper_bgcolor="rgba(0,0,0,0)",
     plot_bgcolor="rgba(0,0,0,0)",
@@ -228,25 +229,6 @@ with tab1:
         params,
     )
 
-    total_obs = int(df_kpi1["total_obs"].iloc[0] or 0)
-    esp_unicas = int(df_kpi1["especies_unicas"].iloc[0] or 0)
-    obs_anp = int(df_kpi1["obs_anp"].iloc[0] or 0)
-    pct_anp = (obs_anp / total_obs * 100) if total_obs > 0 else 0
-    esp_im = int(df_kpi1["especies_im"].iloc[0] or 0)
-
-    c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        kpi_card(f"{total_obs:,}", "Observaciones", f"{rango_anios[0]}–{rango_anios[1]}", "#10B981")
-    with c2:
-        kpi_card(f"{esp_unicas:,}", "Especies Únicas", "Taxones registrados", "#38BDF8")
-    with c3:
-        kpi_card(f"{pct_anp:.1f}%", "En ANP", f"{obs_anp:,} registros protegidos", "#10B981", destacado=True)
-    with c4:
-        kpi_card(f"{esp_im:,}", "Importancia Médica", "Especies con riesgo sanitario", "#F59E0B")
-
-    col_map, col_bar = st.columns([1.15, 1])
-
-    # Consulta anual (la movemos arriba para calcular el % de crecimiento para el KPI)
     df_anual = run_query(
         f"""
         SELECT o.anio, o.en_anp, COUNT(*) AS registros
@@ -259,7 +241,6 @@ with tab1:
         params,
     )
 
-    # Calcular % de crecimiento entre el primer y último año del rango
     totales_anio = df_anual.groupby("anio")["registros"].sum().sort_index()
     if len(totales_anio) >= 2 and totales_anio.iloc[0] > 0:
         pct_crec = ((totales_anio.iloc[-1] - totales_anio.iloc[0]) / totales_anio.iloc[0]) * 100
@@ -268,8 +249,21 @@ with tab1:
     else:
         texto_crec = f"{rango_anios[0]}–{rango_anios[1]}"
 
-    # En tu tarjeta KPI c1, actualiza el subtítulo con texto_crec:
-    # kpi_card(f"{total_obs:,}", "Observaciones", texto_crec, "#10B981")
+    total_obs = int(df_kpi1["total_obs"].iloc[0] or 0)
+    esp_unicas = int(df_kpi1["especies_unicas"].iloc[0] or 0)
+    obs_anp = int(df_kpi1["obs_anp"].iloc[0] or 0)
+    pct_anp = (obs_anp / total_obs * 100) if total_obs > 0 else 0
+    esp_im = int(df_kpi1["especies_im"].iloc[0] or 0)
+
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        kpi_card(f"{total_obs:,}", "Observaciones", texto_crec, "#235A45", "#E4F1EA", "#B2D4C2")
+    with c2:
+        kpi_card(f"{esp_unicas:,}", "Especies Únicas", "Taxones registrados", "#245873", "#E3EFF5", "#B0CFE0")
+    with c3:
+        kpi_card(f"{pct_anp:.1f}%", "En ANP", f"{obs_anp:,} registros protegidos", "#3B6E3C", "#EAF2E2", "#C2D8B4")
+    with c4:
+        kpi_card(f"{esp_im:,}", "Importancia Médica", "Especies con riesgo sanitario", "#8A4B2B", "#F9EAE2", "#E5C0AC")
 
     col_map, col_bar = st.columns([1.15, 1])
 
@@ -293,7 +287,7 @@ with tab1:
                 featureidkey="properties.cve_ent",
                 color="registros",
                 hover_name="nombre",
-                color_continuous_scale=["#0F292E", "#0D9488", "#34D399", "#A7F3D0"],
+                color_continuous_scale=["#F4F1EA", "#B7D7C7", "#67A98E", "#2D6A4F"],
                 title="Mapa de Densidad por Estado",
             )
         else:
@@ -323,7 +317,7 @@ with tab1:
                 featureidkey="properties.cvegeo",
                 color="registros",
                 hover_name="nombre",
-                color_continuous_scale=["#0F292E", "#0D9488", "#34D399", "#A7F3D0"],
+                color_continuous_scale=["#F4F1EA", "#B7D7C7", "#67A98E", "#2D6A4F"],
                 title=f"Densidad Municipal: {estado_sel}",
             )
 
@@ -342,11 +336,10 @@ with tab1:
             y="registros",
             color="Zona",
             barmode="stack",
-            color_discrete_map={"En ANP": "#10B981", "Fuera de ANP": "#0F766E"},
+            color_discrete_map={"En ANP": "#3B7A63", "Fuera de ANP": "#A8C5B8"},
             title="Crecimiento Anual de Observaciones (ANP vs. No ANP)",
             labels={"anio": "Año", "registros": "Registros"},
         )
-        # Etiquetas con % de variación anual encima de cada barra
         for _, row in df_yoy.dropna().iterrows():
             signo = "+" if row["crec_pct"] >= 0 else ""
             fig_bar.add_annotation(
@@ -355,10 +348,11 @@ with tab1:
                 text=f"{signo}{row['crec_pct']:.0f}%",
                 showarrow=False,
                 yshift=10,
-                font=dict(size=10, color="#A7F3D0"),
+                font=dict(size=10, color="#235A45"),
             )
         fig_bar.update_layout(**PLOTLY_LAYOUT, legend=dict(orientation="h", y=1.08, x=0.6))
         st.plotly_chart(fig_bar, use_container_width=True)
+
 
 # =============================================================================
 # PESTAÑA 2: FENOLOGÍA Y CLIMA
@@ -431,17 +425,16 @@ with tab2:
     with k3:
         kpi_card(f"{precip_prom:.0f} mm", "Precipitación Anual", "Promedio acumulado anual", "#245873", "#E3EFF5", "#B0CFE0")
 
-    # Gráfica combinada de doble eje
     meses_lbl = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
-    df_feno_mes["mes_nombre"] = df_feno_mes["mes"].apply(lambda m: meses_lbl[m - 1])
+    df_feno_mes["mes_nombre"] = df_feno_mes["mes"].apply(lambda m: meses_lbl[int(m) - 1])
 
     fig_dual = make_subplots(specs=[[{"secondary_y": True}]])
     fig_dual.add_trace(
-        go.Bar(x=df_feno_mes["mes_nombre"], y=df_feno_mes["registros"], name="Observaciones", marker_color="#10B981", opacity=0.75),
+        go.Bar(x=df_feno_mes["mes_nombre"], y=df_feno_mes["registros"], name="Observaciones", marker_color="#67A98E", opacity=0.82),
         secondary_y=False,
     )
     fig_dual.add_trace(
-        go.Scatter(x=df_feno_mes["mes_nombre"], y=df_feno_mes["temp_media"], name="Temp. Media (°C)", line=dict(color="#F59E0B", width=3)),
+        go.Scatter(x=df_feno_mes["mes_nombre"], y=df_feno_mes["temp_media"], name="Temp. Media (°C)", line=dict(color="#D9822B", width=2.8)),
         secondary_y=True,
     )
     fig_dual.update_layout(**PLOTLY_LAYOUT, title="Observaciones Mensuales vs. Temperatura Media", legend=dict(orientation="h", y=1.12, x=0.65))
@@ -456,11 +449,11 @@ with tab2:
         fig_rango.add_trace(
             go.Scatter(
                 x=df_feno_anio["anio"], y=df_feno_anio["doy_p10"], fill="tonexty",
-                fillcolor="rgba(16, 185, 129, 0.2)", line=dict(width=0), name="Ventana activa (P10–P90)"
+                fillcolor="rgba(103, 169, 142, 0.25)", line=dict(width=0), name="Ventana activa (P10–P90)"
             )
         )
         fig_rango.add_trace(
-            go.Scatter(x=df_feno_anio["anio"], y=df_feno_anio["doy_pico"], mode="lines+markers", line=dict(color="#10B981", width=3), name="Día Pico (Mediana)")
+            go.Scatter(x=df_feno_anio["anio"], y=df_feno_anio["doy_pico"], mode="lines+markers", line=dict(color="#2D6A4F", width=3), name="Día Pico (Mediana)")
         )
         fig_rango.update_layout(**PLOTLY_LAYOUT, title="Ventana de Actividad (DOY) por Año", xaxis_title="Año", yaxis_title="Día del Año (1-366)")
         st.plotly_chart(fig_rango, use_container_width=True)
@@ -473,7 +466,7 @@ with tab2:
             text="anio",
             title="Temperatura Media Anual vs. Día Pico (DOY)",
             labels={"temp_anual": "Temperatura Media (°C)", "doy_pico": "Día Pico (DOY)"},
-            color_discrete_sequence=["#38BDF8"],
+            color_discrete_sequence=["#3A7CA5"],
         )
         fig_scat.update_traces(textposition="top center", marker=dict(size=10))
         fig_scat.update_layout(**PLOTLY_LAYOUT)
@@ -504,11 +497,11 @@ with tab3:
 
     m1, m2, m3 = st.columns(3)
     with m1:
-        kpi_card(f"{int(df_kpi_im['especies_im'].iloc[0] or 0):,}", "Especies Médicas", "Con registros en el periodo", "#F59E0B")
+        kpi_card(f"{int(df_kpi_im['especies_im'].iloc[0] or 0):,}", "Especies Médicas", "Con registros en el periodo", "#8C5319", "#FBF0E1", "#E7CCA6")
     with m2:
-        kpi_card(f"{float(df_kpi_im['pct_fuera_anp'].iloc[0] or 0):.1f}%", "Fuera de ANP", "Zonas urbanas / periurbanas", "#FB7185")
+        kpi_card(f"{float(df_kpi_im['pct_fuera_anp'].iloc[0] or 0):.1f}%", "Fuera de ANP", "Zonas urbanas / periurbanas", "#8A4B2B", "#F9EAE2", "#E5C0AC")
     with m3:
-        kpi_card(f"{int(df_kpi_im['municipios_im'].iloc[0] or 0):,}", "Municipios con Presencia", "Cobertura municipal detectada", "#38BDF8")
+        kpi_card(f"{int(df_kpi_im['municipios_im'].iloc[0] or 0):,}", "Municipios con Presencia", "Cobertura municipal detectada", "#245873", "#E3EFF5", "#B0CFE0")
 
     col_heat, col_right = st.columns([1.2, 1])
 
@@ -534,7 +527,7 @@ with tab3:
             fig_im_map = px.density_map(
                 df_heat, lat="lat", lon="lon", z="densidad", radius=12,
                 center=dict(lat=23.6, lon=-102.5), zoom=4,
-                map_style="carto-darkmatter", color_continuous_scale="Inferno",
+                map_style="carto-positron", color_continuous_scale="YlOrRd",
             )
 
         elif tipo_mapa_im == "Puntos por Género":
@@ -555,10 +548,10 @@ with tab3:
             fig_im_map = px.scatter_map(
                 df_pts, lat="lat", lon="lon", color="genero", size="registros",
                 size_max=18, center=dict(lat=23.6, lon=-102.5), zoom=4,
-                map_style="carto-darkmatter", hover_name="genero",
+                map_style="carto-positron", hover_name="genero",
             )
 
-        else:  # Coroplético por Estado
+        else:
             df_coro_im = run_query(
                 f"""
                 SELECT o.cve_ent, est.nombre, COUNT(*) AS registros
@@ -573,7 +566,7 @@ with tab3:
             fig_im_map = px.choropleth(
                 df_coro_im, geojson=geojson_estados, locations="cve_ent",
                 featureidkey="properties.cve_ent", color="registros",
-                hover_name="nombre", color_continuous_scale="YlOrRd",
+                hover_name="nombre", color_continuous_scale=["#FBF0E1", "#E8A87C", "#C86D51", "#7F3B27"],
             )
             fig_im_map.update_geos(fitbounds="locations", visible=False, bgcolor="rgba(0,0,0,0)")
 
@@ -599,7 +592,7 @@ with tab3:
             y="genero",
             orientation="h",
             color="registros",
-            color_continuous_scale=["#FB7185", "#F59E0B"],
+            color_continuous_scale=["#E8A87C", "#C86D51"],
             title="Top Géneros de Importancia Médica",
             labels={"registros": "Registros", "genero": ""},
         )
@@ -632,7 +625,7 @@ with tab3:
             orientation="v",
             title="Expansión Territorial: Municipios Acumulados",
             labels={"anio_llegada": "Año", "municipios_acumulados": "Municipios"},
-            color_discrete_sequence=["#FB7185"],
+            color_discrete_sequence=["#C86D51"],
         )
         fig_area.update_layout(**PLOTLY_LAYOUT, height=250)
         fig_area.update_xaxes(dtick=1)
@@ -704,13 +697,13 @@ with tab4:
                 orientation="v",
                 title=f"Municipios Acumulados: {especie_sel}",
                 labels={"anio_llegada": "Año", "acumulados": "Municipios"},
-                color_discrete_sequence=["#F59E0B"],
+                color_discrete_sequence=["#D9822B"],
             )
             fig_inv.update_layout(**PLOTLY_LAYOUT)
             fig_inv.update_xaxes(dtick=1)
             st.plotly_chart(fig_inv, use_container_width=True)
 
-            st.markdown("---")
+        st.markdown("---")
         tipo_mapa_inv = st.radio(
             f"Mapa de distribución para {especie_sel}:",
             ["Avance por Año (Puntos)", "Mapa de Calor"],
@@ -737,7 +730,7 @@ with tab4:
             fig_inv_map = px.scatter_map(
                 df_mapa_inv, lat="lat", lon="lon", color="primer_anio", size="registros",
                 size_max=16, center=dict(lat=23.6, lon=-102.5), zoom=4,
-                map_style="carto-darkmatter", color_continuous_scale="Plasma",
+                map_style="carto-positron", color_continuous_scale="Viridis",
                 labels={"primer_anio": "Año 1er registro"},
                 title=f"Distribución Histórica: {especie_sel}",
             )
@@ -745,7 +738,7 @@ with tab4:
             fig_inv_map = px.density_map(
                 df_mapa_inv, lat="lat", lon="lon", z="registros", radius=12,
                 center=dict(lat=23.6, lon=-102.5), zoom=4,
-                map_style="carto-darkmatter", color_continuous_scale="YlOrRd",
+                map_style="carto-positron", color_continuous_scale="YlOrRd",
                 title=f"Densidad de Avistamientos: {especie_sel}",
             )
 

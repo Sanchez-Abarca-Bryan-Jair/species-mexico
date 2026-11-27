@@ -200,11 +200,12 @@ PLOTLY_LAYOUT = dict(
 # -----------------------------------------------------------------------------
 # 4. PESTAÑAS PRINCIPALES
 # -----------------------------------------------------------------------------
-tab1, tab2, tab3, tab4 = st.tabs([
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "Resumen General",
     "Fenología y Clima",
     "Importancia Médica",
     "Especies Invasoras",
+    "Especies Endemicas",
 ])
 
 # =============================================================================
@@ -967,3 +968,289 @@ with tab4:
 
         fig_inv_map.update_layout(**PLOTLY_LAYOUT, height=480)
         st.plotly_chart(fig_inv_map, use_container_width=True)
+
+# =============================================================================
+# PESTAÑA 5: ESPECIES ENDÉMICAS
+# =============================================================================
+with tab5:
+    st.markdown('<div class="dash-title">Dinámica Territorial de Especies Endémicas</div>', unsafe_allow_html=True)
+    st.markdown('<div class="dash-subtitle">Evolución anual de la cobertura municipal (aumento, contracción o estabilidad) y distribución espacial</div>', unsafe_allow_html=True)
+
+    where_end, params_end = build_where(["e.es_endemica = TRUE"])
+
+    df_kpi_end = run_query(
+        f"""
+        SELECT
+            COUNT(DISTINCT o.especie_id) AS especies_end,
+            COUNT(DISTINCT o.cvegeo) AS municipios_end,
+            ROUND(AVG(CASE WHEN o.en_anp THEN 1.0 ELSE 0.0 END) * 100, 1) AS pct_en_anp
+        FROM observaciones o
+        JOIN especies e ON o.especie_id = e.especie_id
+        {where_end};
+        """,
+        params_end,
+    )
+
+    df_end_top = run_query(
+        f"""
+        SELECT
+            e.especie,
+            COALESCE(NULLIF(TRIM(e.nombre_comun), ''), 'Sin nombre común') AS nombre_comun,
+            e.clase,
+            COUNT(*) AS avistamientos,
+            COUNT(DISTINCT o.cve_ent) AS estados,
+            COUNT(DISTINCT o.cvegeo) AS municipios
+        FROM observaciones o
+        JOIN especies e ON o.especie_id = e.especie_id
+        {where_end}
+        GROUP BY e.especie, e.nombre_comun, e.clase
+        ORDER BY municipios DESC, avistamientos DESC
+        LIMIT 15;
+        """,
+        params_end,
+    )
+
+    if df_end_top.empty:
+        st.info("No se encontraron registros de especies endémicas con los filtros actuales.")
+    else:
+        opciones_end = {"Todas las especies endémicas": "TODAS"}
+        for _, row in df_end_top.iterrows():
+            opciones_end[f"{row['especie']} — {row['nombre_comun']}"] = row["especie"]
+
+        etiqueta_end = st.selectbox(
+            "Analizar trayectoria territorial de:",
+            list(opciones_end.keys()),
+            key="sel_endemica",
+        )
+        especie_end = opciones_end[etiqueta_end]
+
+        if especie_end == "TODAS":
+            titulo_end = "Todas las especies endémicas"
+            where_end_act, params_end_act = where_end, params_end
+        else:
+            nom_comun_end = df_end_top.loc[df_end_top["especie"] == especie_end, "nombre_comun"].iloc[0]
+            titulo_end = f"{especie_end} ({nom_comun_end})"
+            where_end_act, params_end_act = build_where(["e.es_endemica = TRUE", "e.especie = %s"])
+            params_end_act = params_end_act + (especie_end,)
+
+        # Municipios activos por año + % de municipios muestreados en ese año (esfuerzo base)
+        where_base, params_base = build_where()
+        df_tray_end = run_query(
+            f"""
+            WITH esfuerzo_anio AS (
+                SELECT o.anio, COUNT(DISTINCT o.cvegeo) AS mun_muestreados
+                FROM observaciones o
+                JOIN especies e ON o.especie_id = e.especie_id
+                {where_base}
+                GROUP BY o.anio
+            ),
+            presencia_anio AS (
+                SELECT
+                    o.anio,
+                    COUNT(DISTINCT o.cvegeo) AS mun_activos,
+                    COUNT(*) AS registros
+                FROM observaciones o
+                JOIN especies e ON o.especie_id = e.especie_id
+                {where_end_act}
+                GROUP BY o.anio
+            )
+            SELECT
+                p.anio,
+                p.mun_activos,
+                p.registros,
+                es.mun_muestreados,
+                ROUND((p.mun_activos::numeric / NULLIF(es.mun_muestreados, 0)) * 100, 2) AS pct_mun_muestreados
+            FROM presencia_anio p
+            LEFT JOIN esfuerzo_anio es ON p.anio = es.anio
+            ORDER BY p.anio;
+            """,
+            params_end_act + params_base,
+        )
+
+        # Calcular cambio entre primer y último año disponible
+        if len(df_tray_end) >= 2 and df_tray_end["mun_activos"].iloc[0] > 0:
+            m_ini = int(df_tray_end["mun_activos"].iloc[0])
+            m_fin = int(df_tray_end["mun_activos"].iloc[-1])
+            delta_m = m_fin - m_ini
+            pct_m = (delta_m / m_ini) * 100
+            estado_tend = "Aumento" if delta_m > 0 else ("Disminución" if delta_m < 0 else "Sin cambio")
+            sub_tend = f"{estado_tend}: {m_ini} → {m_fin} mun. ({'+' if pct_m >= 0 else ''}{pct_m:.1f}%)"
+        else:
+            sub_tend = "Insuficientes años para comparar"
+
+        e1, e2, e3 = st.columns(3)
+        with e1:
+            kpi_card(f"{int(df_kpi_end['especies_end'].iloc[0] or 0):,}", "Especies Endémicas", "Registradas en el filtro", "#235A45", "#E4F1EA", "#B2D4C2")
+        with e2:
+            kpi_card(f"{int(df_kpi_end['municipios_end'].iloc[0] or 0):,}", "Municipios Totales", sub_tend, "#245873", "#E3EFF5", "#B0CFE0")
+        with e3:
+            kpi_card(f"{float(df_kpi_end['pct_en_anp'].iloc[0] or 0):.1f}%", "Dentro de ANP", "Proporción en áreas protegidas", "#3B6E3C", "#EAF2E2", "#C2D8B4")
+
+        col_t_end, col_g_end = st.columns([1.1, 1.15])
+
+        with col_t_end:
+            st.dataframe(
+                df_end_top.rename(columns={
+                    "especie": "Especie",
+                    "nombre_comun": "Nombre común",
+                    "clase": "Clase",
+                    "avistamientos": "Avistamientos",
+                    "estados": "Estados",
+                    "municipios": "Municipios",
+                }),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+        with col_g_end:
+            metrica_end = st.radio(
+                "Métrica de distribución anual:",
+                ["Municipios con presencia", "% de municipios muestreados"],
+                horizontal=True,
+                key="metrica_end_radio",
+            )
+
+            anios_end = sorted(df_tray_end["anio"].astype(int).unique())
+            pos_end = {a: i for i, a in enumerate(anios_end)}
+            df_tray_end["anio_int"] = df_tray_end["anio"].astype(int)
+            df_tray_end["x_pos"] = df_tray_end["anio_int"].map(pos_end)
+            df_tray_end["diff_anio"] = df_tray_end["anio_int"].diff()
+
+            y_col = "mun_activos" if metrica_end == "Municipios con presencia" else "pct_mun_muestreados"
+            y_lbl = "Municipios activos" if metrica_end == "Municipios con presencia" else "% Mun. muestreados"
+            df_tray_end["var_pct"] = df_tray_end[y_col].pct_change() * 100
+
+            fig_end_tray = px.bar(
+                df_tray_end,
+                x="x_pos",
+                y=y_col,
+                title=f"Distribución Anual — {titulo_end}",
+                labels={"x_pos": "Año", y_col: y_lbl},
+                color_discrete_sequence=["#3B7A63"],
+            )
+
+            for _, row in df_tray_end.dropna(subset=["var_pct"]).iterrows():
+                if row["diff_anio"] == 1:
+                    signo = "+" if row["var_pct"] >= 0 else ""
+                    color_txt = "#235A45" if row["var_pct"] >= 0 else "#8A4B2B"
+                    fig_end_tray.add_annotation(
+                        x=row["x_pos"],
+                        y=row[y_col],
+                        text=f"{signo}{row['var_pct']:.0f}%",
+                        showarrow=False,
+                        yshift=10,
+                        font=dict(size=10, color=color_txt),
+                    )
+
+            fig_end_tray.update_xaxes(
+                tickmode="array",
+                tickvals=list(range(len(anios_end))),
+                ticktext=[str(a) for a in anios_end],
+            )
+            fig_end_tray.update_layout(**PLOTLY_LAYOUT)
+            st.plotly_chart(fig_end_tray, use_container_width=True)
+
+        st.markdown("---")
+        opciones_mapa_end = ["Avance por Año (Puntos)", "Mapa de Calor"]
+        if estado_sel != "Todos":
+            opciones_mapa_end.append("Densidad Municipal")
+
+        tipo_mapa_end = st.radio(
+            f"Mapa para {titulo_end}:",
+            opciones_mapa_end,
+            horizontal=True,
+            key="mapa_end_tipo",
+        )
+
+        if tipo_mapa_end == "Densidad Municipal" and estado_sel != "Todos":
+            cve_sel = str(df_cat_estados.loc[df_cat_estados["nombre"] == estado_sel, "cve_ent"].values[0]).zfill(2)
+            geojson_mun_estado = {
+                "type": "FeatureCollection",
+                "features": [
+                    {
+                        **f,
+                        "properties": {
+                            **f["properties"],
+                            "cve_ent": str(f["properties"]["cve_ent"]).zfill(2),
+                            "cvegeo": str(f["properties"]["cvegeo"]).zfill(5),
+                        },
+                    }
+                    for f in geojson_municipios["features"]
+                    if str(f["properties"]["cve_ent"]).zfill(2) == cve_sel
+                ],
+            }
+            df_mapa_mun_end = run_query(
+                f"""
+                SELECT LPAD(o.cvegeo::text, 5, '0') AS cvegeo, m.nombre, COUNT(*) AS registros
+                FROM observaciones o
+                JOIN especies e ON o.especie_id = e.especie_id
+                JOIN municipios m ON LPAD(o.cvegeo::text, 5, '0') = LPAD(m.cvegeo::text, 5, '0')
+                {where_end_act}
+                GROUP BY 1, 2;
+                """,
+                params_end_act,
+            )
+            fig_end_map = px.choropleth(
+                df_mapa_mun_end,
+                geojson=geojson_mun_estado,
+                locations="cvegeo",
+                featureidkey="properties.cvegeo",
+                color="registros",
+                hover_name="nombre",
+                color_continuous_scale=["#E4F1EA", "#95C6B0", "#3B7A63", "#234235"],
+                title=f"Distribución Municipal ({estado_sel}): {titulo_end}",
+            )
+            fig_end_map.update_geos(fitbounds="locations", visible=False, bgcolor="rgba(0,0,0,0)")
+        else:
+            df_mapa_end = run_query(
+                f"""
+                SELECT
+                    ROUND(o.latitud::numeric, 2) AS lat,
+                    ROUND(o.longitud::numeric, 2) AS lon,
+                    MIN(o.anio) AS primer_anio,
+                    COUNT(*) AS registros
+                FROM observaciones o
+                JOIN especies e ON o.especie_id = e.especie_id
+                {where_end_act}
+                GROUP BY 1, 2;
+                """,
+                params_end_act,
+            )
+            center_end = (
+                dict(lat=float(df_mapa_end["lat"].mean()), lon=float(df_mapa_end["lon"].mean()))
+                if estado_sel != "Todos" and not df_mapa_end.empty
+                else dict(lat=23.6, lon=-102.5)
+            )
+            zoom_end = 7 if estado_sel != "Todos" and not df_mapa_end.empty else 4
+
+            if tipo_mapa_end == "Avance por Año (Puntos)":
+                fig_end_map = px.scatter_map(
+                    df_mapa_end,
+                    lat="lat",
+                    lon="lon",
+                    color="primer_anio",
+                    size="registros",
+                    size_max=16,
+                    center=center_end,
+                    zoom=zoom_end,
+                    map_style="carto-positron",
+                    color_continuous_scale="Tealgrn",
+                    labels={"primer_anio": "Año 1er registro"},
+                    title=f"Distribución Histórica: {titulo_end}",
+                )
+            else:
+                fig_end_map = px.density_map(
+                    df_mapa_end,
+                    lat="lat",
+                    lon="lon",
+                    z="registros",
+                    radius=12,
+                    center=center_end,
+                    zoom=zoom_end,
+                    map_style="carto-positron",
+                    color_continuous_scale="YlGnBu",
+                    title=f"Densidad de Avistamientos: {titulo_end}",
+                )
+
+        fig_end_map.update_layout(**PLOTLY_LAYOUT, height=480)
+        st.plotly_chart(fig_end_map, use_container_width=True)

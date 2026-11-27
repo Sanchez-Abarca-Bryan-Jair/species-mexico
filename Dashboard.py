@@ -972,12 +972,41 @@ with tab4:
 # =============================================================================
 # PESTAÑA 5: ESPECIES ENDÉMICAS
 # =============================================================================
+# =============================================================================
+# PESTAÑA 5: ESPECIES ENDÉMICAS
+# =============================================================================
 with tab5:
     st.markdown('<div class="dash-title">Dinámica Territorial de Especies Endémicas</div>', unsafe_allow_html=True)
     st.markdown('<div class="dash-subtitle">Evolución anual de la cobertura municipal (aumento, contracción o estabilidad) y distribución espacial</div>', unsafe_allow_html=True)
 
-    where_end, params_end = build_where(["e.es_invasora = False"])
+    # Ajusta el nombre de columna si en tu BD es distinto (ej. e.es_endemica = TRUE)
+    where_end_base, params_end_base = build_where(["e.es_invasora = FALSE"])
 
+    # 1. Selector de Clase dentro de endémicas
+    df_clases_end = run_query(
+        f"""
+        SELECT DISTINCT e.clase
+        FROM observaciones o
+        JOIN especies e ON o.especie_id = e.especie_id
+        {where_end_base}
+          AND e.clase IS NOT NULL
+        ORDER BY e.clase;
+        """,
+        params_end_base,
+    )
+    opciones_clase_end = ["Todas las clases"] + df_clases_end["clase"].tolist()
+    clase_end_sel = st.selectbox("Filtrar por clase:", opciones_clase_end, key="sel_clase_end")
+
+    extra_cond_end = ["e.es_invasora = FALSE"]
+    extra_params_end = ()
+    if clase_end_sel != "Todas las clases":
+        extra_cond_end.append("e.clase = %s")
+        extra_params_end = (clase_end_sel,)
+
+    where_end_clase, params_end_clase = build_where(extra_cond_end)
+    params_end_clase = params_end_clase + extra_params_end
+
+    # 2. KPIs y Top 15 para la tabla
     df_kpi_end = run_query(
         f"""
         SELECT
@@ -986,9 +1015,9 @@ with tab5:
             ROUND(AVG(CASE WHEN o.en_anp THEN 1.0 ELSE 0.0 END) * 100, 1) AS pct_en_anp
         FROM observaciones o
         JOIN especies e ON o.especie_id = e.especie_id
-        {where_end};
+        {where_end_clase};
         """,
-        params_end,
+        params_end_clase,
     )
 
     df_end_top = run_query(
@@ -1002,38 +1031,59 @@ with tab5:
             COUNT(DISTINCT o.cvegeo) AS municipios
         FROM observaciones o
         JOIN especies e ON o.especie_id = e.especie_id
-        {where_end}
+        {where_end_clase}
         GROUP BY e.especie, e.nombre_comun, e.clase
         ORDER BY municipios DESC, avistamientos DESC
         LIMIT 15;
         """,
-        params_end,
+        params_end_clase,
     )
 
-    if df_end_top.empty:
+    # 3. Catálogo completo de especies endémicas para el buscador (selectbox)
+    df_lista_end = run_query(
+        f"""
+        SELECT DISTINCT
+            e.especie,
+            COALESCE(NULLIF(TRIM(e.nombre_comun), ''), 'Sin nombre común') AS nombre_comun
+        FROM observaciones o
+        JOIN especies e ON o.especie_id = e.especie_id
+        {where_end_clase}
+          AND e.especie IS NOT NULL
+        ORDER BY e.especie;
+        """,
+        params_end_clase,
+    )
+
+    if df_lista_end.empty:
         st.info("No se encontraron registros de especies endémicas con los filtros actuales.")
     else:
         opciones_end = {"Todas las especies endémicas": "TODAS"}
-        for _, row in df_end_top.iterrows():
+        mapa_nombres_end = {}
+        for _, row in df_lista_end.iterrows():
             opciones_end[f"{row['especie']} — {row['nombre_comun']}"] = row["especie"]
+            mapa_nombres_end[row["especie"]] = row["nombre_comun"]
 
         etiqueta_end = st.selectbox(
-            "Analizar trayectoria territorial de:",
+            "Analizar trayectoria territorial de (escribe para buscar):",
             list(opciones_end.keys()),
             key="sel_endemica",
         )
         especie_end = opciones_end[etiqueta_end]
 
         if especie_end == "TODAS":
-            titulo_end = "Todas las especies endémicas"
-            where_end_act, params_end_act = where_end, params_end
+            titulo_end = (
+                "Todas las especies endémicas"
+                if clase_end_sel == "Todas las clases"
+                else f"Endémicas de la clase {clase_end_sel}"
+            )
+            where_end_act, params_end_act = where_end_clase, params_end_clase
         else:
-            nom_comun_end = df_end_top.loc[df_end_top["especie"] == especie_end, "nombre_comun"].iloc[0]
+            nom_comun_end = mapa_nombres_end.get(especie_end, "Sin nombre común")
             titulo_end = f"{especie_end} ({nom_comun_end})"
-            where_end_act, params_end_act = build_where(["e.es_endemica = TRUE", "e.especie = %s"])
-            params_end_act = params_end_act + (especie_end,)
+            where_end_act, params_end_act = build_where(extra_cond_end + ["e.especie = %s"])
+            params_end_act = params_end_act + extra_params_end + (especie_end,)
 
-        # Municipios activos por año + % de municipios muestreados en ese año (esfuerzo base)
+        # 4. Trayectoria anual (municipios activos y % de municipios muestreados)
         where_base, params_base = build_where()
         df_tray_end = run_query(
             f"""
@@ -1067,7 +1117,6 @@ with tab5:
             params_end_act + params_base,
         )
 
-        # Calcular cambio entre primer y último año disponible
         if len(df_tray_end) >= 2 and df_tray_end["mun_activos"].iloc[0] > 0:
             m_ini = int(df_tray_end["mun_activos"].iloc[0])
             m_fin = int(df_tray_end["mun_activos"].iloc[-1])
@@ -1118,6 +1167,7 @@ with tab5:
 
             y_col = "mun_activos" if metrica_end == "Municipios con presencia" else "pct_mun_muestreados"
             y_lbl = "Municipios activos" if metrica_end == "Municipios con presencia" else "% Mun. muestreados"
+            fmt_dec = ".0f" if metrica_end == "Municipios con presencia" else ".1f"
             df_tray_end["var_pct"] = df_tray_end[y_col].pct_change() * 100
 
             fig_end_tray = px.bar(
@@ -1136,7 +1186,7 @@ with tab5:
                     fig_end_tray.add_annotation(
                         x=row["x_pos"],
                         y=row[y_col],
-                        text=f"{signo}{row['var_pct']:.0f}%",
+                        text=f"{signo}{row['var_pct']:{fmt_dec}}%",
                         showarrow=False,
                         yshift=10,
                         font=dict(size=10, color=color_txt),

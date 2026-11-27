@@ -976,7 +976,7 @@ with tab5:
     st.markdown('<div class="dash-title">Dinámica Territorial de Especies Endémicas</div>', unsafe_allow_html=True)
     st.markdown('<div class="dash-subtitle">Evolución anual de la cobertura municipal (aumento, contracción o estabilidad) y distribución espacial</div>', unsafe_allow_html=True)
 
-    where_end, params_end = build_where(["e.es_endemica = TRUE"])
+    where_end, params_end = build_where(["e.es_invasora = False"])
 
     df_kpi_end = run_query(
         f"""
